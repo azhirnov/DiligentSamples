@@ -37,7 +37,7 @@ namespace Diligent
 class FirstPersonCamera
 {
 public:
-    void Update(InputController& Controller, float ElapsedTime);
+    void Update(InputControllerBase& Controller, float ElapsedTime);
     void SetRotation(float Yaw, float Pitch);
     void SetLookAt(const float3& LookAt);
     void SetMoveSpeed(float MoveSpeed) { m_fMoveSpeed = MoveSpeed; }

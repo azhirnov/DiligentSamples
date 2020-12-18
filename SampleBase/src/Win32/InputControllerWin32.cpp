@@ -92,12 +92,6 @@ InputControllerWin32::InputControllerWin32()
     UpdateMousePos();
 }
 
-const MouseState& InputControllerWin32::GetMouseState()
-{
-    UpdateMousePos();
-    return InputControllerBase::GetMouseState();
-}
-
 bool InputControllerWin32::HandleNativeMessage(const void* MsgData)
 {
     m_MouseState.WheelDelta = 0;
@@ -232,6 +226,10 @@ bool InputControllerWin32::HandleNativeMessage(const void* MsgData)
             // Update member var state
             m_MouseState.WheelDelta = (float)((short)HIWORD(wParam)) / (float)WHEEL_DELTA;
             MsgHandled              = true;
+            break;
+
+        case WM_MOUSEMOVE:
+            UpdateMousePos();
             break;
     }
 

@@ -31,7 +31,7 @@
 namespace Diligent
 {
 
-void FirstPersonCamera::Update(InputController& Controller, float ElapsedTime)
+void FirstPersonCamera::Update(InputControllerBase& Controller, float ElapsedTime)
 {
     float3 MoveDirection = float3(0, 0, 0);
     // Update acceleration vector based on keyboard state
