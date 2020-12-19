@@ -278,8 +278,8 @@ protected:
 
     virtual void SelectDeviceType() override final
     {
-        DialogBox(NULL, MAKEINTRESOURCE(IDD_DEVICE_TYPE_SELECTION_DIALOG), NULL, SelectDeviceTypeDialogProc);
-        m_DeviceType = g_DeviceType;
+        //DialogBox(NULL, MAKEINTRESOURCE(IDD_DEVICE_TYPE_SELECTION_DIALOG), NULL, SelectDeviceTypeDialogProc);
+        m_DeviceType = Diligent::RENDER_DEVICE_TYPE_VULKAN;
     }
 
     bool m_bFullScreenWindow = false;
