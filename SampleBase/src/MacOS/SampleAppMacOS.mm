@@ -73,8 +73,8 @@ public:
             // happens in DisplayLinkCallback which is called from some other
             // thread. To avoid issues with autorelease pool, we have to pop
             // it now by calling FinishFrame.
-            m_pImmediateContext->Flush();
-            m_pImmediateContext->FinishFrame();
+            ImmediateContext()->Flush();
+            ImmediateContext()->FinishFrame();
         }
     }
 
@@ -82,7 +82,7 @@ public:
     {
         std::lock_guard<std::mutex> lock(AppMutex);
 
-        m_pImmediateContext->SetRenderTargets(0, nullptr, nullptr, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        ImmediateContext()->SetRenderTargets(0, nullptr, nullptr, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
         SampleApp::Render();
     }

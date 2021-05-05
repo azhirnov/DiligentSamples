@@ -60,9 +60,9 @@ void AtmosphereSample::Initialize(const SampleInitInfo& InitInfo)
 {
     SampleBase::Initialize(InitInfo);
 
-    const auto& deviceCaps = InitInfo.pDevice->GetDeviceCaps();
-    m_bIsGLDevice          = deviceCaps.IsGLDevice();
-    if (m_pDevice->GetDeviceCaps().DevType == RENDER_DEVICE_TYPE_GLES)
+    const auto& deviceInfo = InitInfo.pDevice->GetDeviceInfo();
+    m_bIsGLDevice          = deviceInfo.IsGLDevice();
+    if (deviceInfo.Type == RENDER_DEVICE_TYPE_GLES)
     {
         m_ShadowSettings.Resolution                        = 512;
         m_TerrainRenderParams.m_FilterAcrossShadowCascades = false;

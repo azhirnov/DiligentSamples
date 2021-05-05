@@ -76,10 +76,10 @@ SampleApp::~SampleApp()
     m_pImGui.reset();
     m_TheSample.reset();
 
-    if (m_pImmediateContext)
-        m_pImmediateContext->Flush();
-    m_pDeferredContexts.clear();
-    m_pImmediateContext.Release();
+    for (Uint32 q = 0; q < m_NumImmediateContexts; ++q)
+        m_pDeviceContexts[q]->Flush();
+    m_pDeviceContexts.clear();
+    m_NumImmediateContexts = 0;
     m_pSwapChain.Release();
     m_pDevice.Release();
 }
@@ -97,7 +97,48 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
     m_SwapChainInitDesc.BufferCount = 3;
 #endif
 
-    std::vector<IDeviceContext*> ppContexts;
+    std::vector<GraphicsAdapterInfo>        Adapters;
+    std::vector<ImmediateContextCreateInfo> ContextCI;
+    std::vector<IDeviceContext*>            ppContexts;
+
+    auto EnumerateAdapters = [&Adapters](IEngineFactory* pFactory, Version MinVersion) //
+    {
+        Uint32 NumAdapters = 0;
+        pFactory->EnumerateAdapters(MinVersion, NumAdapters, 0);
+        if (NumAdapters > 0)
+        {
+            Adapters.resize(NumAdapters);
+            pFactory->EnumerateAdapters(MinVersion, NumAdapters, Adapters.data());
+        }
+    };
+
+    auto AddContext = [&ContextCI, &Adapters](COMMAND_QUEUE_TYPE Type, const char* Name, Uint32 AdapterId) //
+    {
+        if (AdapterId >= Adapters.size())
+            AdapterId = 0;
+
+        constexpr auto QueueMask = COMMAND_QUEUE_TYPE_PRIMARY_MASK;
+        auto*          Queues    = Adapters[AdapterId].Queues;
+        for (Uint32 q = 0, Count = Adapters[AdapterId].NumQueues; q < Count; ++q)
+        {
+            auto& CurQueue = Queues[q];
+            if (CurQueue.MaxDeviceContexts == 0)
+                continue;
+
+            if ((CurQueue.QueueType & QueueMask) == Type)
+            {
+                CurQueue.MaxDeviceContexts -= 1;
+
+                ImmediateContextCreateInfo Ctx{};
+                Ctx.QueueId  = static_cast<Uint8>(q);
+                Ctx.Name     = Name;
+                Ctx.Priority = QUEUE_PRIORITY_MEDIUM;
+                ContextCI.push_back(Ctx);
+                return;
+            }
+        }
+    };
+
     switch (m_DeviceType)
     {
 #if D3D11_SUPPORTED
@@ -116,19 +157,10 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
             // Load the dll and import GetEngineFactoryD3D11() function
             auto GetEngineFactoryD3D11 = LoadGraphicsEngineD3D11();
 #    endif
-            auto* pFactoryD3D11 = GetEngineFactoryD3D11();
-            m_pEngineFactory    = pFactoryD3D11;
-            Uint32 NumAdapters  = 0;
-            pFactoryD3D11->EnumerateAdapters(EngineCI.MinimumFeatureLevel, NumAdapters, 0);
-            std::vector<GraphicsAdapterInfo> Adapters(NumAdapters);
-            if (NumAdapters > 0)
-            {
-                pFactoryD3D11->EnumerateAdapters(EngineCI.MinimumFeatureLevel, NumAdapters, Adapters.data());
-            }
-            else
-            {
-                LOG_ERROR_AND_THROW("Failed to find Direct3D11-compatible hardware adapters");
-            }
+            auto* pFactoryD3D11         = GetEngineFactoryD3D11();
+            m_pEngineFactory            = pFactoryD3D11;
+            EngineCI.GraphicsAPIVersion = {11, 0};
+            EnumerateAdapters(pFactoryD3D11, EngineCI.GraphicsAPIVersion);
 
             if (m_AdapterType == ADAPTER_TYPE_SOFTWARE)
             {
@@ -147,13 +179,13 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
             if (m_AdapterType != ADAPTER_TYPE_SOFTWARE)
             {
                 Uint32 NumDisplayModes = 0;
-                pFactoryD3D11->EnumerateDisplayModes(EngineCI.MinimumFeatureLevel, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, nullptr);
+                pFactoryD3D11->EnumerateDisplayModes(EngineCI.GraphicsAPIVersion, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, nullptr);
                 m_DisplayModes.resize(NumDisplayModes);
-                pFactoryD3D11->EnumerateDisplayModes(EngineCI.MinimumFeatureLevel, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, m_DisplayModes.data());
+                pFactoryD3D11->EnumerateDisplayModes(EngineCI.GraphicsAPIVersion, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, m_DisplayModes.data());
             }
 
             EngineCI.AdapterId = m_AdapterId;
-            ppContexts.resize(1 + EngineCI.NumDeferredContexts);
+            ppContexts.resize(std::max(size_t{1}, ContextCI.size()) + EngineCI.NumDeferredContexts);
             pFactoryD3D11->CreateDeviceAndContextsD3D11(EngineCI, &m_pDevice, ppContexts.data());
             if (!m_pDevice)
             {
@@ -186,25 +218,9 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
                 LOG_ERROR_AND_THROW("Failed to load Direct3D12");
             }
 
-            m_pEngineFactory   = pFactoryD3D12;
-            Uint32 NumAdapters = 0;
-            pFactoryD3D12->EnumerateAdapters(EngineCI.MinimumFeatureLevel, NumAdapters, 0);
-            std::vector<GraphicsAdapterInfo> Adapters(NumAdapters);
-            if (NumAdapters > 0)
-            {
-                pFactoryD3D12->EnumerateAdapters(EngineCI.MinimumFeatureLevel, NumAdapters, Adapters.data());
-            }
-            else
-            {
-#    if D3D11_SUPPORTED
-                LOG_ERROR_MESSAGE("Failed to find Direct3D12-compatible hardware adapters. Attempting to initialize the engine in Direct3D11 mode.");
-                m_DeviceType = RENDER_DEVICE_TYPE_D3D11;
-                InitializeDiligentEngine(pWindow);
-                return;
-#    else
-                LOG_ERROR_AND_THROW("Failed to find Direct3D12-compatible hardware adapters.");
-#    endif
-            }
+            m_pEngineFactory            = pFactoryD3D12;
+            EngineCI.GraphicsAPIVersion = {11, 0};
+            EnumerateAdapters(pFactoryD3D12, EngineCI.GraphicsAPIVersion);
 
             if (m_AdapterType == ADAPTER_TYPE_SOFTWARE)
             {
@@ -223,13 +239,20 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
             if (m_AdapterType != ADAPTER_TYPE_SOFTWARE)
             {
                 Uint32 NumDisplayModes = 0;
-                pFactoryD3D12->EnumerateDisplayModes(EngineCI.MinimumFeatureLevel, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, nullptr);
+                pFactoryD3D12->EnumerateDisplayModes(EngineCI.GraphicsAPIVersion, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, nullptr);
                 m_DisplayModes.resize(NumDisplayModes);
-                pFactoryD3D12->EnumerateDisplayModes(EngineCI.MinimumFeatureLevel, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, m_DisplayModes.data());
+                pFactoryD3D12->EnumerateDisplayModes(EngineCI.GraphicsAPIVersion, m_AdapterId, 0, TEX_FORMAT_RGBA8_UNORM_SRGB, NumDisplayModes, m_DisplayModes.data());
             }
 
             EngineCI.AdapterId = m_AdapterId;
-            ppContexts.resize(1 + EngineCI.NumDeferredContexts);
+            AddContext(COMMAND_QUEUE_TYPE_GRAPHICS, "Graphics", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_COMPUTE, "Compute", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_TRANSFER, "Transfer", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_GRAPHICS, "Graphics 2", EngineCI.AdapterId);
+            EngineCI.NumImmediateContexts  = static_cast<Uint32>(ContextCI.size());
+            EngineCI.pImmediateContextInfo = EngineCI.NumImmediateContexts ? ContextCI.data() : nullptr;
+
+            ppContexts.resize(std::max(size_t{1}, ContextCI.size()) + EngineCI.NumDeferredContexts);
             pFactoryD3D12->CreateDeviceAndContextsD3D12(EngineCI, &m_pDevice, ppContexts.data());
             if (!m_pDevice)
             {
@@ -270,9 +293,8 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
                 LOG_ERROR_MESSAGE("Deferred contexts are not supported in OpenGL mode");
                 EngineCI.NumDeferredContexts = 0;
             }
-            ppContexts.resize(1 + EngineCI.NumDeferredContexts);
-            pFactoryOpenGL->CreateDeviceAndSwapChainGL(
-                EngineCI, &m_pDevice, ppContexts.data(), m_SwapChainInitDesc, &m_pSwapChain);
+            ppContexts.resize(std::max(size_t{1}, ContextCI.size()) + EngineCI.NumDeferredContexts);
+            pFactoryOpenGL->CreateDeviceAndSwapChainGL(EngineCI, &m_pDevice, ppContexts.data(), m_SwapChainInitDesc, &m_pSwapChain);
             if (!m_pDevice)
             {
                 LOG_ERROR_AND_THROW("Unable to initialize Diligent Engine in OpenGL mode. The API may not be available, "
@@ -293,10 +315,20 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
             if (m_ValidationLevel >= 0)
                 EngineCI.SetValidationLevel(static_cast<VALIDATION_LEVEL>(m_ValidationLevel));
 
-            m_TheSample->GetEngineInitializationAttribs(m_DeviceType, EngineCI, m_SwapChainInitDesc);
-            ppContexts.resize(1 + EngineCI.NumDeferredContexts);
             auto* pFactoryVk = GetEngineFactoryVk();
             m_pEngineFactory = pFactoryVk;
+            EnumerateAdapters(pFactoryVk, Version{});
+            EngineCI.AdapterId = m_AdapterId;
+
+            AddContext(COMMAND_QUEUE_TYPE_GRAPHICS, "Graphics", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_COMPUTE, "Compute", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_TRANSFER, "Transfer", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_GRAPHICS, "Graphics 2", EngineCI.AdapterId);
+            EngineCI.NumImmediateContexts  = static_cast<Uint32>(ContextCI.size());
+            EngineCI.pImmediateContextInfo = EngineCI.NumImmediateContexts ? ContextCI.data() : nullptr;
+
+            m_TheSample->GetEngineInitializationAttribs(m_DeviceType, EngineCI, m_SwapChainInitDesc);
+            ppContexts.resize(std::max(size_t{1}, ContextCI.size()) + EngineCI.NumDeferredContexts);
             pFactoryVk->CreateDeviceAndContextsVk(EngineCI, &m_pDevice, ppContexts.data());
             if (!m_pDevice)
             {
@@ -318,10 +350,20 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
             if (m_ValidationLevel >= 0)
                 EngineCI.SetValidationLevel(static_cast<VALIDATION_LEVEL>(m_ValidationLevel));
 
-            m_TheSample->GetEngineInitializationAttribs(m_DeviceType, EngineCI, m_SwapChainInitDesc);
-            ppContexts.resize(1 + EngineCI.NumDeferredContexts);
             auto* pFactoryMtl = GetEngineFactoryMtl();
             m_pEngineFactory  = pFactoryMtl;
+            EnumerateAdapters(pFactoryMtl, Version{});
+            EngineCI.AdapterId = m_AdapterId;
+
+            AddContext(COMMAND_QUEUE_TYPE_GRAPHICS, "Graphics", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_COMPUTE, "Compute", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_TRANSFER, "Transfer", EngineCI.AdapterId);
+            AddContext(COMMAND_QUEUE_TYPE_GRAPHICS, "Graphics 2", EngineCI.AdapterId);
+            EngineCI.NumImmediateContexts  = static_cast<Uint32>(ContextCI.size());
+            EngineCI.pImmediateContextInfo = EngineCI.NumImmediateContexts ? ContextCI.data() : nullptr;
+
+            m_TheSample->GetEngineInitializationAttribs(m_DeviceType, EngineCI, m_SwapChainInitDesc);
+            ppContexts.resize(std::max(size_t{1}, ContextCI.size()) + EngineCI.NumDeferredContexts);
             pFactoryMtl->CreateDeviceAndContextsMtl(EngineCI, &m_pDevice, ppContexts.data());
             if (!m_pDevice)
             {
@@ -356,11 +398,10 @@ void SampleApp::InitializeDiligentEngine(const NativeWindow* pWindow)
     m_AppTitle.append(std::to_string(DILIGENT_API_VERSION));
     m_AppTitle.push_back(')');
 
-    m_pImmediateContext.Attach(ppContexts[0]);
-    auto NumDeferredCtx = ppContexts.size() - 1;
-    m_pDeferredContexts.resize(NumDeferredCtx);
-    for (Uint32 ctx = 0; ctx < NumDeferredCtx; ++ctx)
-        m_pDeferredContexts[ctx].Attach(ppContexts[1 + ctx]);
+    m_NumImmediateContexts = std::max(1u, static_cast<Uint32>(ContextCI.size()));
+    m_pDeviceContexts.resize(ppContexts.size());
+    for (size_t i = 0; i < ppContexts.size(); ++i)
+        m_pDeviceContexts[i].Attach(ppContexts[i]);
 
     if (m_ScreenCaptureInfo.AllowCapture)
     {
@@ -400,19 +441,18 @@ void SampleApp::InitializeSample()
 
     m_MaxFrameLatency = SCDesc.BufferCount;
 
-    std::vector<IDeviceContext*> ppContexts(1 + m_pDeferredContexts.size());
-    ppContexts[0]         = m_pImmediateContext;
-    Uint32 NumDeferredCtx = static_cast<Uint32>(m_pDeferredContexts.size());
-    for (size_t ctx = 0; ctx < m_pDeferredContexts.size(); ++ctx)
-        ppContexts[1 + ctx] = m_pDeferredContexts[ctx];
+    std::vector<IDeviceContext*> ppContexts(m_pDeviceContexts.size());
+    for (size_t ctx = 0; ctx < m_pDeviceContexts.size(); ++ctx)
+        ppContexts[ctx] = m_pDeviceContexts[ctx];
 
     SampleInitInfo InitInfo;
-    InitInfo.pEngineFactory = m_pEngineFactory;
-    InitInfo.pDevice        = m_pDevice;
-    InitInfo.ppContexts     = ppContexts.data();
-    InitInfo.NumDeferredCtx = NumDeferredCtx;
-    InitInfo.pSwapChain     = m_pSwapChain;
-    InitInfo.pImGui         = m_pImGui.get();
+    InitInfo.pEngineFactory  = m_pEngineFactory;
+    InitInfo.pDevice         = m_pDevice;
+    InitInfo.ppContexts      = ppContexts.data();
+    InitInfo.NumImmediateCts = m_NumImmediateContexts;
+    InitInfo.NumDeferredCtx  = static_cast<Uint32>(m_pDeviceContexts.size()) - m_NumImmediateContexts;
+    InitInfo.pSwapChain      = m_pSwapChain;
+    InitInfo.pImGui          = m_pImGui.get();
     m_TheSample->Initialize(InitInfo);
 
     m_TheSample->WindowResize(SCDesc.Width, SCDesc.Height);
@@ -431,7 +471,7 @@ void SampleApp::UpdateAdaptersDialog()
     {
         if (m_AdapterAttribs.Type != ADAPTER_TYPE_UNKNOWN)
         {
-            ImGui::TextDisabled("Adapter: %s (%d MB)", m_AdapterAttribs.Description, static_cast<int>(m_AdapterAttribs.DeviceLocalMemory >> 20));
+            ImGui::TextDisabled("Adapter: %s (%d MB)", m_AdapterAttribs.Description, static_cast<int>(m_AdapterAttribs.Memory.LocalMemory >> 20));
         }
 
         if (!m_DisplayModes.empty())
@@ -481,7 +521,7 @@ void SampleApp::UpdateAdaptersDialog()
 
         ImGui::Checkbox("VSync", &m_bVSync);
 
-        if (m_pDevice->GetDeviceCaps().IsD3DDevice())
+        if (m_pDevice->GetDeviceInfo().IsD3DDevice())
         {
             // clang-format off
             std::pair<Uint32, const char*> FrameLatencies[] = 
@@ -771,23 +811,23 @@ void SampleApp::Update(double CurrTime, double ElapsedTime)
 
 void SampleApp::Render()
 {
-    if (!m_pImmediateContext || !m_pSwapChain)
+    if (m_NumImmediateContexts == 0 || !ImmediateContext() || !m_pSwapChain)
         return;
 
     ITextureView* pRTV = m_pSwapChain->GetCurrentBackBufferRTV();
     ITextureView* pDSV = m_pSwapChain->GetDepthBufferDSV();
-    m_pImmediateContext->SetRenderTargets(1, &pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    ImmediateContext()->SetRenderTargets(1, &pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
     m_TheSample->Render();
 
     // Restore default render target in case the sample has changed it
-    m_pImmediateContext->SetRenderTargets(1, &pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    ImmediateContext()->SetRenderTargets(1, &pRTV, pDSV, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     if (m_pImGui)
     {
         if (m_bShowUI)
         {
             // No need to call EndFrame as ImGui::Render calls it automatically
-            m_pImGui->Render(m_pImmediateContext);
+            m_pImGui->Render(ImmediateContext());
         }
         else
         {
@@ -823,11 +863,11 @@ void SampleApp::CompareGoldenImage(const std::string& FileName, ScreenCapture::C
     }
 
     MappedTextureSubresource TexData;
-    m_pImmediateContext->MapTextureSubresource(Capture.pTexture, 0, 0, MAP_READ, MAP_FLAG_DO_NOT_WAIT, nullptr, TexData);
+    ImmediateContext()->MapTextureSubresource(Capture.pTexture, 0, 0, MAP_READ, MAP_FLAG_DO_NOT_WAIT, nullptr, TexData);
     auto CapturedPixels = Image::ConvertImageData(TexDesc.Width, TexDesc.Height,
                                                   reinterpret_cast<const Uint8*>(TexData.pData), TexData.Stride,
                                                   TexDesc.Format, TEX_FORMAT_RGBA8_UNORM, false /*Keep alpha*/);
-    m_pImmediateContext->UnmapTextureSubresource(Capture.pTexture, 0, 0);
+    ImmediateContext()->UnmapTextureSubresource(Capture.pTexture, 0, 0);
 
     auto* pGoldenImgPixels = reinterpret_cast<const Uint8*>(pGoldenImg->GetData()->GetDataPtr());
 
@@ -849,7 +889,7 @@ void SampleApp::CompareGoldenImage(const std::string& FileName, ScreenCapture::C
 void SampleApp::SaveScreenCapture(const std::string& FileName, ScreenCapture::CaptureInfo& Capture)
 {
     MappedTextureSubresource TexData;
-    m_pImmediateContext->MapTextureSubresource(Capture.pTexture, 0, 0, MAP_READ, MAP_FLAG_DO_NOT_WAIT, nullptr, TexData);
+    ImmediateContext()->MapTextureSubresource(Capture.pTexture, 0, 0, MAP_READ, MAP_FLAG_DO_NOT_WAIT, nullptr, TexData);
     const auto& TexDesc = Capture.pTexture->GetDesc();
 
     Image::EncodeInfo Info;
@@ -864,7 +904,7 @@ void SampleApp::SaveScreenCapture(const std::string& FileName, ScreenCapture::Ca
 
     RefCntAutoPtr<IDataBlob> pEncodedImage;
     Image::Encode(Info, &pEncodedImage);
-    m_pImmediateContext->UnmapTextureSubresource(Capture.pTexture, 0, 0);
+    ImmediateContext()->UnmapTextureSubresource(Capture.pTexture, 0, 0);
 
     FileWrapper pFile(FileName.c_str(), EFileAccessMode::Overwrite);
     if (pFile)
@@ -893,8 +933,8 @@ void SampleApp::Present()
     {
         if (m_CurrentTime - m_ScreenCaptureInfo.LastCaptureTime >= 1.0 / m_ScreenCaptureInfo.CaptureFPS)
         {
-            m_pImmediateContext->SetRenderTargets(0, nullptr, nullptr, RESOURCE_STATE_TRANSITION_MODE_NONE);
-            m_pScreenCapture->Capture(m_pSwapChain, m_pImmediateContext, m_ScreenCaptureInfo.CurrentFrame);
+            ImmediateContext()->SetRenderTargets(0, nullptr, nullptr, RESOURCE_STATE_TRANSITION_MODE_NONE);
+            m_pScreenCapture->Capture(m_pSwapChain, ImmediateContext(), m_ScreenCaptureInfo.CurrentFrame);
 
             m_ScreenCaptureInfo.LastCaptureTime = m_CurrentTime;
 
@@ -905,7 +945,7 @@ void SampleApp::Present()
             {
                 VERIFY(m_ScreenCaptureInfo.FramesToCapture == 0, "Only single frame is expected to be captured in golden image capture/comparison modes");
                 // Idle the context to make the capture available
-                m_pImmediateContext->WaitForIdle();
+                ImmediateContext()->WaitForIdle();
                 if (!m_pScreenCapture->HasCapture())
                 {
                     LOG_ERROR_MESSAGE("Screen capture is not available after idling the context");

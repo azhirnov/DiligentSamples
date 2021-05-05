@@ -245,6 +245,8 @@ void Tutorial06_Multithreading::WorkerThreadFunc(Tutorial06_Multithreading* pThi
         if (SignaledValue < 0)
             return;
 
+        pDeferredCtx->Begin(0);
+
         // Render current subset using the deferred context
         pThis->RenderSubset(pDeferredCtx, 1 + ThreadNum);
 

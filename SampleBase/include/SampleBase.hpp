@@ -44,12 +44,13 @@ class ImGuiImplDiligent;
 
 struct SampleInitInfo
 {
-    IEngineFactory*    pEngineFactory = nullptr;
-    IRenderDevice*     pDevice        = nullptr;
-    IDeviceContext**   ppContexts     = nullptr;
-    Uint32             NumDeferredCtx = 0;
-    ISwapChain*        pSwapChain     = nullptr;
-    ImGuiImplDiligent* pImGui         = nullptr;
+    IEngineFactory*    pEngineFactory  = nullptr;
+    IRenderDevice*     pDevice         = nullptr;
+    IDeviceContext**   ppContexts      = nullptr;
+    Uint32             NumImmediateCts = 0;
+    Uint32             NumDeferredCtx  = 0;
+    ISwapChain*        pSwapChain      = nullptr;
+    ImGuiImplDiligent* pImGui          = nullptr;
 };
 
 class SampleBase
@@ -123,7 +124,7 @@ inline void SampleBase::Initialize(const SampleInitInfo& InitInfo)
     m_pImmediateContext = InitInfo.ppContexts[0];
     m_pDeferredContexts.resize(InitInfo.NumDeferredCtx);
     for (Uint32 ctx = 0; ctx < InitInfo.NumDeferredCtx; ++ctx)
-        m_pDeferredContexts[ctx] = InitInfo.ppContexts[1 + ctx];
+        m_pDeferredContexts[ctx] = InitInfo.ppContexts[InitInfo.NumImmediateCts + ctx];
     m_pImGui = InitInfo.pImGui;
 }
 

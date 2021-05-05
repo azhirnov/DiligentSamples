@@ -120,7 +120,7 @@ float4x4 SampleBase::GetAdjustedProjectionMatrix(float FOV, float NearPlane, flo
     float4x4 Proj;
     Proj._11 = XScale;
     Proj._22 = YScale;
-    Proj.SetNearFarClipPlanes(NearPlane, FarPlane, m_pDevice->GetDeviceCaps().IsGLDevice());
+    Proj.SetNearFarClipPlanes(NearPlane, FarPlane, m_pDevice->GetDeviceInfo().IsGLDevice());
     return Proj;
 }
 

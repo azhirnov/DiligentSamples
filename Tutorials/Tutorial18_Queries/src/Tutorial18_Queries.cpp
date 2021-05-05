@@ -95,7 +95,7 @@ void Tutorial18_Queries::Initialize(const SampleInitInfo& InitInfo)
     m_pCubeSRB->GetVariableByName(SHADER_TYPE_PIXEL, "g_Texture")->Set(m_CubeTextureSRV);
 
     // Check query support
-    const auto& Features = m_pDevice->GetDeviceCaps().Features;
+    const auto& Features = m_pDevice->GetDeviceInfo().Features;
     if (Features.PipelineStatisticsQueries)
     {
         QueryDesc queryDesc;

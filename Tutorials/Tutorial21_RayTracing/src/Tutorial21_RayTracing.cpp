@@ -110,7 +110,7 @@ void Tutorial21_RayTracing::CreateGraphicsPSO()
 
 void Tutorial21_RayTracing::CreateRayTracingPSO()
 {
-    m_MaxRecursionDepth = std::min(m_MaxRecursionDepth, m_pDevice->GetDeviceProperties().MaxRayTracingRecursionDepth);
+    m_MaxRecursionDepth = std::min(m_MaxRecursionDepth, m_pDevice->GetAdapterInfo().RayTracing.MaxRecursionDepth);
 
     // Prepare ray tracing pipeline description.
     RayTracingPipelineStateCreateInfo PSOCreateInfo;
@@ -958,7 +958,7 @@ void Tutorial21_RayTracing::WindowResize(Uint32 Width, Uint32 Height)
     // Update projection matrix.
     float AspectRatio = static_cast<float>(Width) / static_cast<float>(Height);
     m_Camera.SetProjAttribs(m_Constants.ClipPlanes.x, m_Constants.ClipPlanes.y, AspectRatio, PI_F / 4.f,
-                            m_pSwapChain->GetDesc().PreTransform, m_pDevice->GetDeviceCaps().IsGLDevice());
+                            m_pSwapChain->GetDesc().PreTransform, m_pDevice->GetDeviceInfo().IsGLDevice());
 
     // Check if the image needs to be recreated.
     if (m_pColorRT != nullptr &&

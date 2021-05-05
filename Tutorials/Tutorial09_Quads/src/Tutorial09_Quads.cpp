@@ -463,6 +463,8 @@ void Tutorial09_Quads::WorkerThreadFunc(Tutorial09_Quads* pThis, Uint32 ThreadNu
         if (SignaledValue < 0)
             return;
 
+        pDeferredCtx->Begin(0);
+
         // Render current subset using the deferred context
         if (pThis->m_BatchSize > 1)
             pThis->RenderSubset<true>(pDeferredCtx, 1 + ThreadNum);

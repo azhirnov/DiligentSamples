@@ -434,8 +434,8 @@ void Tutorial10_DataStreaming::UpdateUI()
                 StartWorkerThreads(m_NumWorkerThreads);
             }
         }
-        if (m_pDevice->GetDeviceCaps().DevType == RENDER_DEVICE_TYPE_D3D12 ||
-            m_pDevice->GetDeviceCaps().DevType == RENDER_DEVICE_TYPE_VULKAN)
+        if (m_pDevice->GetDeviceInfo().Type == RENDER_DEVICE_TYPE_D3D12 ||
+            m_pDevice->GetDeviceInfo().Type == RENDER_DEVICE_TYPE_VULKAN)
         {
             ImGui::Checkbox("Persistent map", &m_bAllowPersistentMap);
         }
@@ -606,6 +606,8 @@ void Tutorial10_DataStreaming::WorkerThreadFunc(Tutorial10_DataStreaming* pThis,
         auto SignaledValue = pThis->m_RenderSubsetSignal.Wait(true, NumWorkerThreads);
         if (SignaledValue < 0)
             return;
+
+        pDeferredCtx->Begin(0);
 
         // Render current subset using the deferred context
         if (pThis->m_BatchSize > 1)
